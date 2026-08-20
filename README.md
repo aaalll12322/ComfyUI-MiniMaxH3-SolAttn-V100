@@ -141,5 +141,5 @@ H3 模型 ──> Sol-Attn (V100) ──> 采样器（KSampler 等）
 ```
 
 - 论文：https://arxiv.org/abs/2607.24027
-- 官方代码：https://github.com/NVlabs/Sana（`sol-engine` 分支，`techniques/sparse_backends/sol_attn`）
+- 官方代码：https://github.com/NVlabs/Sana/tree/sol-engine/techniques/sparse_backends/sol_attn（Sol-Attn 实现位于 `sol-engine` 分支）
 - 项目页：https://nvlabs.github.io/Sana/Sol-Attn/

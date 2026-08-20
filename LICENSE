@@ -19,3 +19,35 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+THIRD-PARTY COMPONENT LICENSE NOTICES
+
+This project incorporates third-party software components under the following
+licenses. The MIT license above applies ONLY to the original code written by
+the author (aaalll12322) for this project. Each third-party component is
+governed by its own license terms.
+
+1. FlashAttention sparse kernel (native/csrc/flash_attn/)
+   - License: BSD 3-Clause
+   - Copyright (c) 2024, Tri Dao
+   - Full license: licenses/BSD-3-CLAUSE.txt
+   - Source chain: rwashy/H3-V100 (overall GPL-3.0-only; only the BSD-3-Clause
+     FlashAttention component is used, no GPL files) -> Icbears/flash-attention-v100
+     -> Dao-AILab/flash-attention. See native/NOTICE.md.
+
+2. NVIDIA CUTLASS (native/third_party/cutlass/)
+   - License: BSD 3-Clause (CUTLASS switched from Apache-2.0 to BSD-3-Clause)
+   - Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES
+   - Full license: licenses/CUTLASS-BSD-3-CLAUSE.txt
+   - NOTICE requirements satisfied in native/NOTICE.md
+
+3. Sol-Attn sparse algorithm (routing.py implementation)
+   - Reference: arXiv 2607.24027, NVlabs/Sana sol-engine (sol-engine branch,
+     techniques/sparse_backends/sol_attn)
+   - Used under academic citation terms; see README.md Citation section.
+
+4. FP16Safe logic (fp16safe.py, embedded)
+   - License: MIT, Copyright (c) 2026 aaalll12322
+   - Source: ComfyUI-MiniMaxH3-FP16Safe (MIT), embedded as a self-contained module.

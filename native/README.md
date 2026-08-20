@@ -48,5 +48,5 @@ native/
 - 上游：flash-attention（Tri Dao）官方 sparse kernel，
   https://github.com/Dao-AILab/flash-attention（BSD 3-Clause）；
   sm70 移植链经 https://github.com/Icbears/flash-attention-v100。
-- CUTLASS：https://github.com/NVIDIA/cutlass（Apache-2.0），见 `third_party/cutlass/`。
+- CUTLASS：https://github.com/NVIDIA/cutlass（BSD 3-Clause，自 2025 年起；此前为 Apache-2.0），见 `third_party/cutlass/` 与根目录 `licenses/CUTLASS-BSD-3-CLAUSE.txt`。
 - 稀疏算法/路由：Sol-Attn（arXiv 2607.24027，NVlabs/Sana sol-engine）。

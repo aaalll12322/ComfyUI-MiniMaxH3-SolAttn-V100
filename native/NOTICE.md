@@ -33,4 +33,6 @@ sparse attention kernel（keep-or-drop），经 V100（sm_70）移植链分发�
 `third_party/cutlass/` 为 **NVIDIA CUTLASS**（编译 kernel 所需头文件）：
 
 - 官方仓库：https://github.com/NVIDIA/cutlass
-- 许可证：Apache License 2.0，完整文本见 https://www.apache.org/licenses/LICENSE-2.0
+- 许可证：**BSD 3-Clause**（自 2025 年起 CUTLASS 采用 BSD-3-Clause，SPDX:
+  `BSD-3-Clause`；此前为 Apache-2.0）。完整文本见仓库根 `licenses/CUTLASS-BSD-3-CLAUSE.txt`
+  （含 NVIDIA 版权声明与 `python/CuTeDSL` 目录的 EULA 例外说明）。

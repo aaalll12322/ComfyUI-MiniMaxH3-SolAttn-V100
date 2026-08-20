@@ -141,5 +141,5 @@ The sparse algorithm used by this project comes from the Sol-Attn paper. If this
 ```
 
 - Paper: https://arxiv.org/abs/2607.24027
-- Official code: https://github.com/NVlabs/Sana (`sol-engine` branch, `techniques/sparse_backends/sol_attn`)
+- Official code: https://github.com/NVlabs/Sana/tree/sol-engine/techniques/sparse_backends/sol_attn (Sol-Attn lives on the `sol-engine` branch)
 - Project page: https://nvlabs.github.io/Sana/Sol-Attn/
