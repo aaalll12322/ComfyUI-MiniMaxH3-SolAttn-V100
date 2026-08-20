@@ -37,16 +37,22 @@ _PYD_NAME = "comfy_v100_solattn_cuda.cp312-win_amd64.pyd"
 
 
 def _load_extension():
-    """加载预编译 kernel pyd（含 keep-or-drop sparse op；随插件分发，无需本地编译）。"""
+    """加载预编译 kernel pyd（含 keep-or-drop sparse op；随插件分发，无需本地编译）。
+
+    按名称前缀 ``comfy_v100_solattn_cuda*.pyd`` 匹配：预编译版（cp312）与其他用户
+    自行编译的版本（cp311/cp313 等，文件名后缀随 Python 版本变化）均可识别。
+    """
     global _EXTENSION_LOADED
     if _EXTENSION_LOADED:
         return
-    pyd = Path(__file__).resolve().parent / _PYD_NAME
-    if not pyd.exists():
+    pyd_dir = Path(__file__).resolve().parent
+    candidates = sorted(pyd_dir.glob("comfy_v100_solattn_cuda*.pyd"))
+    if not candidates:
         raise RuntimeError(
-            f"SolAttn: 缺少预编译 kernel {_PYD_NAME}（应随插件分发在插件目录下）"
+            f"SolAttn: 缺少预编译 kernel {_PYD_NAME}（应随插件分发在插件目录下，"
+            f"或从 Release 下载 / 自行编译 native/ 后放入插件目录）"
         )
-    torch.ops.load_library(str(pyd))
+    torch.ops.load_library(str(candidates[0]))
     _EXTENSION_LOADED = True
 
 

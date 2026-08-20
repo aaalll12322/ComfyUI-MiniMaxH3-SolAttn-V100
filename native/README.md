@@ -1,7 +1,7 @@
 # native — SolAttn (V100) 稀疏 kernel 源码编译
 
 本目录包含 keep-or-drop sparse kernel 的**完整源码**（flash-attn 官方 sparse kernel，Tri Dao 版权，sm70 适配），
-用于编译 `comfy_v100_solattn_cuda.cp312-win_amd64.pyd`。**仅含 `varlen_fwd_sparse` 一个 op**（无 dense/backward op）。
+用于编译 `comfy_v100_solattn_cuda*.pyd`。**仅含 `varlen_fwd_sparse` 一个 op**（无 dense/backward op）。
 
 ## 为什么源码编译
 
@@ -21,8 +21,19 @@ cd native
 MAX_JOBS=4 python setup.py build_ext --inplace
 ```
 
-产出 `native/comfy_v100_solattn_cuda.cp312-win_amd64.pyd`（或 build/lib.win-amd64-cpython-312/ 下），
-复制到插件根目录（custom_nodes/ComfyUI-MiniMaxH3-SolAttn-V100/）即可。
+## 产物文件名（重要）
+
+输出文件名的后缀随**编译用的 Python 版本**变化：
+
+| 编译用 Python | 产物文件名 |
+|---|---|
+| 3.12 | `comfy_v100_solattn_cuda.cp312-win_amd64.pyd` |
+| 3.11 | `comfy_v100_solattn_cuda.cp311-win_amd64.pyd` |
+| 3.13 | `comfy_v100_solattn_cuda.cp313-win_amd64.pyd` |
+
+**插件启动时自动匹配 `comfy_v100_solattn_cuda` 前缀的任意 pyd**（`nodes.py` 的
+`_load_extension` 用 glob 查找），所以**文件名不要求特定 Python 版本后缀**——编译出的
+`cp311`/`cp313` 等版本直接复制到插件根目录即可被识别，无需改名。
 
 > Windows 多核并行：`MAX_JOBS=4`（默认串行单核很慢）。
 

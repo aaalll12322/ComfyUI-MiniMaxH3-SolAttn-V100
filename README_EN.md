@@ -57,12 +57,13 @@ git clone https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100.git
 # Option 2: copy the whole folder into custom_nodes/ (kernel needed, see below)
 ```
 
-**Getting the kernel** (`comfy_v100_solattn_cuda.cp312-win_amd64.pyd`, pick one):
+**Getting the kernel** (`comfy_v100_solattn_cuda*.pyd`, pick one; the plugin auto-matches any pyd whose name starts with `comfy_v100_solattn_cuda` — no specific Python-version suffix required):
 - **Release prebuilt**: download from GitHub Release (Windows + Python 3.12, zero compilation)
 - **Build from source**: full source ships in `native/` (incl. CUTLASS), one command:
   ```bash
   cd native && python setup.py build_ext --inplace
-  # copy the artifact to the plugin root; build for other platforms/Python versions yourself
+  # copy the artifact (comfy_v100_solattn_cuda.cpXXX-win_amd64.pyd, XXX follows the
+  # Python version used to build) to the plugin root — the plugin detects it automatically
   ```
 
 Restart ComfyUI. Find **"Sol-Attn (V100)"** under the `sol_attn` category.
@@ -141,5 +142,5 @@ The sparse algorithm used by this project comes from the Sol-Attn paper. If this
 ```
 
 - Paper: https://arxiv.org/abs/2607.24027
-- Official code: https://github.com/NVlabs/Sana/tree/sol-engine/techniques/sparse_backends/sol_attn (Sol-Attn lives on the `sol-engine` branch)
+- Official code: <https://github.com/NVlabs/Sana/tree/sol-engine/techniques/sparse_backends/sol_attn> (Sol-Attn lives on the `sol-engine` branch)
 - Project page: https://nvlabs.github.io/Sana/Sol-Attn/

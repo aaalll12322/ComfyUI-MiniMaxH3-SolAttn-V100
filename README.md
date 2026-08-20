@@ -57,12 +57,13 @@ git clone https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100.git
 # 方式二：手动复制整个文件夹到 custom_nodes/（需要 kernel：见下方"kernel 获取"）
 ```
 
-**kernel 获取**（`comfy_v100_solattn_cuda.cp312-win_amd64.pyd`，二选一）：
+**kernel 获取**（`comfy_v100_solattn_cuda*.pyd`，二选一；插件启动时自动匹配 `comfy_v100_solattn_cuda` 前缀的 pyd，**文件名不要求特定 Python 版本后缀**）：
 - **Release 预编译**：从 GitHub Release 下载（Windows + Python 3.12，零编译）
 - **源码编译**：仓库自带完整源码（`native/`，含 CUTLASS），一条命令：
   ```bash
   cd native && python setup.py build_ext --inplace
-  # 产物复制到插件根目录；跨平台/其他 Python 版本自行编译即可
+  # 产物（comfy_v100_solattn_cuda.cpXXX-win_amd64.pyd，XXX 随编译用的
+  # Python 版本变化）复制到插件根目录即可，插件自动识别
   ```
 
 重启 ComfyUI。工作流中在 `sol_attn` 分类下找到 **"Sol-Attn (V100)"** 节点。
@@ -141,5 +142,5 @@ H3 模型 ──> Sol-Attn (V100) ──> 采样器（KSampler 等）
 ```
 
 - 论文：https://arxiv.org/abs/2607.24027
-- 官方代码：https://github.com/NVlabs/Sana/tree/sol-engine/techniques/sparse_backends/sol_attn（Sol-Attn 实现位于 `sol-engine` 分支）
+- 官方代码：<https://github.com/NVlabs/Sana/tree/sol-engine/techniques/sparse_backends/sol_attn>（Sol-Attn 实现位于 `sol-engine` 分支）
 - 项目页：https://nvlabs.github.io/Sana/Sol-Attn/
