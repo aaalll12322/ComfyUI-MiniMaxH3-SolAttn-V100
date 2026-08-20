@@ -58,7 +58,7 @@ git clone https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100.git
 ```
 
 **kernel 获取**（`comfy_v100_solattn_cuda*.pyd`，二选一；插件启动时自动匹配 `comfy_v100_solattn_cuda` 前缀的 pyd，**文件名不要求特定 Python 版本后缀**）：
-- **Release 预编译**：从 GitHub Release 下载（Windows + Python 3.12，零编译）
+- **Release 预编译**：从 [GitHub Release](https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100/releases) 下载（Windows + Python 3.12，零编译）
 - **源码编译**：仓库自带完整源码（`native/`，含 CUTLASS），一条命令：
   ```bash
   cd native && python setup.py build_ext --inplace

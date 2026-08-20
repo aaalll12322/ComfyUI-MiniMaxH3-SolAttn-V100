@@ -58,7 +58,7 @@ git clone https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100.git
 ```
 
 **Getting the kernel** (`comfy_v100_solattn_cuda*.pyd`, pick one; the plugin auto-matches any pyd whose name starts with `comfy_v100_solattn_cuda` — no specific Python-version suffix required):
-- **Release prebuilt**: download from GitHub Release (Windows + Python 3.12, zero compilation)
+- **Release prebuilt**: download from [GitHub Release](https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100/releases) (Windows + Python 3.12, zero compilation)
 - **Build from source**: full source ships in `native/` (incl. CUTLASS), one command:
   ```bash
   cd native && python setup.py build_ext --inplace
