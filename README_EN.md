@@ -1,12 +1,12 @@
 # ComfyUI-MiniMaxH3-SolAttn-V100
 
-**Sol-Attn (arXiv 2607.24027) sparse acceleration · single-node attention accelerator for MiniMax H3 on V100 (ComfyUI custom node) · v1.0.0**
+**Sol-Attn (arXiv 2607.24027) sparse acceleration · single-node attention accelerator for MiniMax H3 on V100 (ComfyUI custom node) · v1.1.1**
 
 > 中文版: [README.md](README.md) · Development/design docs: [DEVELOPMENT.md](DEVELOPMENT.md) / [DEVELOPMENT_EN.md](DEVELOPMENT_EN.md)
 >
 > **AI-assisted development notice**: This project was developed by the author with the help of an AI assistant (DeepSeek-V4-Flash). The author has no computer-science background; code and docs were co-written with AI. The project is shared as-is under the MIT license; if you run into issues, please open an Issue and we will help within our capabilities.
 
-One node = **embedded FP16Safe (fp16 safety) + Sol-Attn official sparse (keep-or-drop)**. On V100 (sm_70), MiniMax H3 video generation drops from **71-74 s/step to 43 s/step at 480p/10s (~1.7×), with no visible quality loss**.
+One node = **embedded FP16Safe (fp16 safety) + Sol-Attn official sparse (keep-or-drop)**. On V100 (sm_70), MiniMax H3 video generation drops from **71-74 s/step to 43 s/step at 480p/10s (~1.7×); 24 s/step vs 33 s/step dense at 960×544/5s (+27%) with quality visually ≈ dense** (v1.1.1 top-K guarantee fixes v1.0's hand/edge loss on high-motion/text/complex-action scenes).
 
 ---
 
@@ -38,13 +38,12 @@ Sol-Attn sparse idea: most attention scores are noise — **compute only the few
 
 | Config | s/step | Quality |
 |---|---|---|
-| Pure FP16Safe (baseline) | 71-74s | normal |
-| Pure SDPA + FP16Safe (dense fallback) | ~70s | normal |
-| **Sol-Attn (recommended, `tau=1.0`)** | **43s** | **no visible loss** |
+| Pure FP16Safe (baseline) | 71-74s (480p/10s); 33s (960×544/5s) | normal |
+| **Sol-Attn v1.1.1 (recommended `tau=0.75, topk=32`)** | **43s (480p/10s); 24s (960×544/5s)** | **visually ≈ dense** |
 
-- vs pure FP16Safe: **~1.7×**
+- vs pure FP16Safe: **~1.7×** at 480p/10s; **+27%** at 960×544/5s (top-K guarantee keeps quality ≈ dense on high-motion/text/complex-action scenes)
 - Single attention (S=29650): sparse kernel **4.55×** vs SDPA (route+kernel 2.77×)
-- Routing vectorized: **10ms @ S=29650**; kernel consumes non-contiguous inputs (saves 3 copies)
+- Routing v1.1: **6.2ms @ S=29650 / 35.6ms @ S=98512** (view-based block stats, zero pad copies); kernel consumes non-contiguous inputs (saves 3 copies)
 
 ---
 
@@ -93,14 +92,16 @@ The single node performs fp16 safety + sparse. **No separate FP16Safe node neede
 | `end_percent` | 1.0 | Run dense after this sampling progress (1.0 = no trailing dense, matches the measured 43 s/step; 0.9 keeps trailing quality) |
 | `min_tokens` | 1024 | Sequences shorter than this stay dense (SDPA) |
 | `dense_blocks` | "0-1" | Transformer blocks kept dense, e.g. `"0-1"` = first two, `"0-2,-1"` = first three + last (-1 counts from the end); empty = sparsify all |
-| `h3_prefix_tokens` | 0 | H3 text/cond/ref/audio prefix tokens (KV sink; e.g. 634+cond+ref+audio; can stay 0 in turbo scenes) |
+| `h3_prefix_tokens` | 0 | H3 text/cond/ref/audio prefix tokens (KV sink; first run: check `[SolAttn][v1.1.1] S=...` on console, suggest ≥ actual prefix) |
+| `topk_blocks` | 32 | **Per-row guaranteed blocks (quality fix)**: threshold routing is a "mean-alignment detector" that filters out low-alignment high-motion/new-content blocks (lost hands/edges/limbs). Forces top-K highest-score blocks per row. 0 = off (v1.0 behavior). 32 ≈ 2% density cost on 1540 blocks |
 | `debug_nan` / `profile` | false | Pass-through FP16Safe NaN detection / timing stats |
 
 ### Recommended configs
 
-- **Recommended (fastest at 480p)**: `tau=1.0, start_percent=0.2, end_percent=1.0, dense_blocks="0-1"` → 43 s/step (no visible loss)
-- **More aggressive**: `tau=1.2~1.5` (lower density, faster; verify quality yourself)
-- **Conservative**: `dense_blocks="0-2,-1"` or `end_percent=0.9` (more layers / trailing dense, sturdier quality, slightly slower)
+- **Recommended (quality/speed balance, v1.1.1)**: `tau=0.75, start_percent=0.2, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32, h3_prefix_tokens=<actual prefix>` → 43 s/step at 480p/10s; 24 s/step at 960×544/5s (quality ≈ dense)
+- **Speed-first**: `tau=1.0, topk_blocks=16` (lower density, faster; verify quality yourself)
+- **Max quality**: `topk_blocks=64` (more guaranteed blocks per row; most stable on motion/text; slower)
+- **Conservative**: `dense_blocks="0-2,-1"` or `end_percent=0.8` (more layers / trailing dense, sturdier quality, slightly slower)
 - **Small resolutions** (608 and below): attention share is low, sparse gains are small — prefer `end_percent=0` (fully dense) or skip the plugin
 
 ---
@@ -124,6 +125,7 @@ The single node performs fp16 safety + sparse. **No separate FP16Safe node neede
 
 ## Changelog
 
+- **v1.1.1 (2026-08-22, WIP)**: ① routing perf — removed per-layer GPU→CPU sync, rank int32, off half memory, view-based block stats (S=98512 route 182→35.6ms; S=174112 no longer OOM); ② **quality fix top-K guarantee** (`topk_blocks`, default 32): `combined = min(threshold, kthvalue(K-th largest))` keeps ≥K blocks per row; real-activation rel 0.1157→0.0619 (-47%), fixes hand/edge loss on high-motion/cut/text/complex-action scenes; ③ prefix debug: console prints `[SolAttn][v1.1.1] S=... density=... prefix_tokens=...`; ④ real-machine 960×544/5s (S=20822): **24 s/step vs 33 s/step dense (+27%), quality visually ≈ dense**; 480p/10s (S≈98512) 42 s/step (tau=0.75). Recommended `tau=0.75, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32`.
 - **v1.0.0 (2026-08-20) initial release**: single node = embedded FP16Safe (`fp16safe.py`, v6.8.0 logic, self-contained) + Sol-Attn sparse (keep-or-drop, sparse-only kernel). Measured 480p/10s at **43 s/step, no visible loss** (~1.7× vs pure FP16Safe 71-74 s/step). Parameters aligned to kijai style (tau / start_percent / end_percent / min_tokens / dense_blocks / h3_prefix_tokens); dense fallback = plain SDPA; kernel source in `native/` (self-buildable), prebuilt pyd from Release. Tag `[SolAttn-V100][V1.0]`.
 
 ---

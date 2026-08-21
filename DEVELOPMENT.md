@@ -44,6 +44,9 @@ Sol-Attn (V100) 节点（单节点 patch）
 4. **路由向量化**：csr_from_sel 最初有 `for r in uniq` Python 循环（1562ms @ S=6154）；改为高级索引 + cumsum 槽位后 **10ms @ S=29650**。GPU 任务必须向量化（用户铁律）。
 5. **`_sparse_attn` 不限制 S%64**：kernel（is_even_MN=false 路径）支持任意序列长度的边界处理（S=6154 实测正确）。
 6. **采样窗口用 percent 语义**（kijai 风格）：`start_percent/end_percent` 由 transformer_options 的 `step/total_steps` 换算，缺省时回退 sigma>14 判断（turbo 4-step 第一步 sigma≈14.64 → 自然 dense）。
+7. **top-k 保底（v1.1.1 质量修复）**：Sol-Attn 阈值路由是"均值对齐检测"（只保留 `scores > mean+τ·std` 的块），**高动态/新内容块的 key 与 query 对齐度低 → 恰好被过滤**（用户实测：手/边缘/肢体在动态帧丢失）。修复 = 每行保底 top-K：`combined_threshold = min(threshold, kthvalue(第 K 大))`，kthvalue 一次选择 O(N) 无排序，`sel = scores >= combined` 数学上 = 阈值路由 ∪ top-K。节点参数 `topk_blocks`（默认 32）。真实激活快照 rel 0.1157→0.0619（-47%）。
+8. **阈值公式的 var 是 kc 跨块方差**（全局常数，对每个块相同）——"var 推高阈值剪动态块"是误解；动态块被剪只因对齐度低。**不要**改成 `mean - α·var`（会把无关块拉进来），top-K 保底才是对症。
+9. **路由性能（v1.1）**：去 `sel_perm.any()` 每层 GPU→CPU 同步（LOW_VRAM 下打断权重预取流水线）；rank 改 int32；off 支持 nnz_s 缩小（kernel 运行时读 num_blks，多余槽位不读）；**块统计视图化**（fp16 view+sum，零 F.pad/float 拷贝——非连续输入上 F.pad 慢 ~17 倍）。S=98512 路由 182→35.6ms，S=174112 不再 OOM。
 
 ## 4. 验证数据（本机 V100-SXM2-16GB, torch 2.8.0+cu128, ComfyUI Python 3.12）
 
@@ -87,6 +90,40 @@ Sol-Attn (V100) 节点（单节点 patch）
 
 per-head keep-or-drop，τ=1.0 时密度 26.4%（S=6154 真实激活），vs dense 的 rel-L2 = **0.223**。早期记录的"5.8e-3"是 head 并集计算的假象（路由 per-head 选块、计算取并集 → 实际密度远高于报告值），度量不一致已作废。**尽管 rel 0.22，真实视频（turbo 4step）肉眼无损**——最终质量以真机判定为准（用户要求，替代纯 L∞/rel 指标）。
 
+**⚠️ v1.0 质量判定覆盖不足**（用户 2026-08-21 反馈）：静态/中等场景无损，但**高动态/快速切镜/大量文字/复杂动作**下手指变形、边缘融化、肢体异常。根因 = 阈值路由"均值对齐检测"剪掉对齐度低的新内容块（见 §3.7）。修复 = top-k 保底（v1.1.1）。
+
+### 4.6 v1.1.1 验证数据（路由优化 + top-k 保底）
+
+**路由性能**（V100 真机，非连续输入、与节点相同路径）：
+
+| S | v1.0 路由 | v1.1 路由 | 峰值显存（v1.1） |
+|---|---|---|---|
+| 29650 | 107ms | **6.2ms** | 1.04GB |
+| 98512 | 182ms | **35.6ms** | 5.01GB |
+| 174112 | 估算 450ms+（OOM 风险） | **110.7ms** | 11.94GB |
+
+**top-k 质量**（真实激活快照 S=6154，vs dense 的 rel）：
+
+| 配置 | rel | 密度 | 说明 |
+|---|---|---|---|
+| tau=1.0 topk=0（v1.0） | 0.1157 | 25.9% | 基线 |
+| tau=1.0 topk=32 | 0.0640（-45%） | 36.3% | 仅加保底 |
+| **tau=0.75 topk=32（推荐）** | **0.0619（-47%）** | 38.6% | 质量/速度平衡 |
+| tau=0.75 topk=64 | 0.0237（-80%） | 66.6% | 极致质量，速度损失大 |
+
+top-k 每行额外覆盖 ~10 个阈值漏掉的块（正是动态/新内容块）。
+
+**端到端（用户真机，960×544/5s，S=20822，FLOW_AV，LOW_VRAM）**：
+
+| 方案 | s/步 | vs dense |
+|---|---|---|
+| 纯 FP16Safe（dense） | 33 | 1× |
+| **Sol-Attn v1.1.1（tau=0.75 + topk=32）** | **24** | **+27% 加速，质量肉眼≈dense** |
+
+注：480p/10s（S≈98512）实测 42s/步（v1.1 路由 + tau=0.75），与 S=20822 工作流不可直接比较（不同 seq）。
+
+**GPU 温度洞察**：稀疏 kernel 跑满 util 99% 时温度仅 51-59°C（dense 满负荷 70°C）= "高占用低功耗"（TC 未饱和）。**温度 ≠ GPU 空闲**，不能凭温度判断优化空间。
+
 ## 5. 踩坑记录
 
 1. **diff 行尾符污染**：CRLF/LF 混用会让 diff 把整个文件标为不同 → 必须 `diff --strip-trailing-cr`。
@@ -99,11 +136,19 @@ per-head keep-or-drop，τ=1.0 时密度 26.4%（S=6154 真实激活），vs den
 8. **scatter+masked_fill 陷阱**：`off.scatter_(1, rank, col)` 写"槽位"，`masked_fill_(~sel)` 清"列位"——两者坐标系不一致会互相污染。用高级索引 `off[rows, pos] = col[cols]` 只写选中位置最稳。
 9. **显存峰值换页吃收益（大序列 + 低显存）**：kernel 快 ≠ 端到端快；额外 kernel 的显存峰值导致模型换页，可吃掉全部计算收益。测速必须端到端真机，不能只看 kernel 单测。
 10. **组件移除不彻底**：重构/改名时，除删除相关模块文件外，还要清理 nodes.py 中的 import、transformer_options 键、参数与日志引用——逐个 grep 确认无残留。
+11. **非连续输入上 F.pad 慢 ~17 倍**（v1.1 实测）：q3 布局 [S,H,D] stride [D,S·D,1]，S 维跨 3.79M 跳转缓存全失效（S=29650 单次 pad 26ms vs 连续 1.55ms）。块统计改用视图化 view+sum（fp16 累加 64 项，误差 ~1e-3，对 sel 差异 0.006% 可忽略），不再 F.pad/全量 float()。
+12. **sparse kernel 仅支持全序列 qlen==klen 单次调用**（v1.1 实测）：q 分块×全 k（qlen≠klen）输出错误（rel 11.4 vs dense）；q/k 同步分块语义也不对（rel 6.2）。若 ComfyUI 路径分块调用 attention 会输出爆炸——当前实现依赖全序列单次调用，改动路径必须重测。
+13. **温度 ≠ 空闲**：稀疏 kernel util 99% 时温度 51-59°C（dense 70°C）——高占用低功耗特性（TC 未饱和），别用温度判断"还有优化空间"。
 
 ## 6. 已知限制与后续方向
 
-- **路由开销**：Python 层 ~10ms @ S=29650，理论 GEMM 级 ~1ms。优化方向：torch.compile / kernel 内联路由（kijai 融合两级结构）。
-- **稀疏质量边界**：H3 注意力分散（top-16/97 块仅 66% mass），要保 95% mass 需 ~48% 密度。当前 26% 密度肉眼无损（turbo 场景），更敏感场景需调参（tau/end_percent/dense_blocks）或加 zeroth-order 修正项。
+- **路由开销**：Python 层 ~35.6ms @ S=98512（v1.1），理论 GEMM 级 ~1-2ms。优化方向：fused routing CUDA kernel（重编译 pyd，消除 scores 中间张量）；步内相邻层路由复用（P1，需 PSNR 验证）。
+- **稀疏质量边界**：top-K 保底（v1.1.1）已解决高动态/新内容误剪，但密度与质量的平衡仍靠 tau/topk 调参。极敏感场景（精细文字/复杂肢体）建议 topk=64 或扩 dense_blocks/end_percent。
 - **tau_profile（per-block tau）**：kijai 支持按层配置 tau（敏感层低 τ、迟钝层高 τ），当前为全局 tau，后续可加。
 - **平台**：仅 V100/sm_70 + Windows + cp312 验证；pyd 需在目标平台重新编译。
 - **候选路线**：①自研 keep-or-drop CUTLASS kernel（绕开 PAI 实验代码）；②对照 NVlabs/Sana sol-engine `models/minimax_h3/A100/adapter.py`（官方 H3 适配 3.95×-4.52×）；③等官方参考实现。
+
+## 7. 版本历史
+
+- **v1.1.1（开发中，2026-08-22）**：①路由性能——去每层 GPU→CPU 同步、rank int32、off 缩 NB/2、块统计视图化（S=98512 182→35.6ms，S=174112 不 OOM）；②**质量修复 top-K 保底**（`topk_blocks` 参数，default 32）：`combined = min(threshold, kthvalue(第K大))` 每行保底 K 块，真实激活 rel 0.1157→0.0619（-47%），解决高动态/新内容块误剪；③prefix debug：首次调用打印 S/密度/prefix/topk；④真机 960×544/5s（S=20822）：24s/步 vs dense 33s/步（+27%），质量肉眼≈dense；480p/10s（S≈98512）42s/步（tau=0.75）。推荐配置：`tau=0.75, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32`。
+- **v1.0.0（2026-08-20 正式版）**：单节点 = 内嵌 FP16Safe（`fp16safe.py`，v6.8.0 逻辑，自包含）+ Sol-Attn 稀疏（keep-or-drop，sparse-only kernel）。480p/10s 实测 **43s/步，画质肉眼无损**（~1.7× vs 纯 FP16Safe 71-74s）。参数对齐 kijai 风格；dense 兜底 = 原版 SDPA；Release 提供预编译 pyd。

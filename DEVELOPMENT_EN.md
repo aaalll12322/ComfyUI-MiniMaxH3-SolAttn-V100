@@ -44,6 +44,9 @@ Sol-Attn (V100) node (single-node patch)
 4. **Vectorized routing**: `csr_from_sel` originally had a `for r in uniq` Python loop (1562ms @ S=6154); advanced indexing + cumsum slots brought it to **10ms @ S=29650**.
 5. **`_sparse_attn` does not require S%64**: the kernel (is_even_MN=false path) handles arbitrary sequence lengths (verified at S=6154).
 6. **Sampling window in percent semantics** (kijai style): `start_percent/end_percent` derived from `step/total_steps` in transformer_options; falls back to sigma>14 check (turbo 4-step step-1 sigma≈14.64 → naturally dense).
+7. **Top-K guarantee (v1.1.1 quality fix)**: Sol-Attn threshold routing is a "mean-alignment detector" (keeps only `scores > mean+τ·std`), so **high-motion/new-content blocks with low key-query alignment get filtered out** (real-machine: hands/edges/limbs lost on dynamic frames). Fix = per-row top-K guarantee: `combined_threshold = min(threshold, kthvalue(K-th largest))` — kthvalue is O(N) selection, no sort; `sel = scores >= combined` is mathematically threshold-routing ∪ top-K. Node param `topk_blocks` (default 32). Real-activation rel 0.1157→0.0619 (-47%).
+8. **The `var` in the threshold formula is the cross-block variance of kc** (a global constant, identical for every block) — "var raises the threshold and prunes dynamic blocks" is a misconception; dynamic blocks are pruned only because of low alignment. Do **not** switch to `mean - α·var` (would pull in irrelevant blocks); top-K is the right fix.
+9. **Routing perf (v1.1)**: removed `sel_perm.any()` per-layer GPU→CPU sync (stalls the weight-prefetch pipeline under LOW_VRAM); rank int32; off supports nnz_s shrink (kernel reads num_blks at runtime; extra slots unread); **view-based block stats** (fp16 view+sum, zero F.pad/float copies — F.pad on non-contiguous input is ~17× slower). S=98512 route 182→35.6ms; S=174112 no longer OOM.
 
 ## 4. Measured data (V100-SXM2-16GB, torch 2.8.0+cu128, ComfyUI Python 3.12)
 
@@ -87,6 +90,40 @@ Also: the kernel consumes non-contiguous q/k/v directly (stride-based access, me
 
 Per-head keep-or-drop at τ=1.0: density 26.4% (S=6154 real activations), rel-L2 vs dense = **0.223**. The earlier "5.8e-3" was an artifact of head-union computation (per-head routing but unioned compute → real density far above the reported value); the inconsistent metric was discarded. **Despite rel 0.22, real videos (turbo 4step) show no visible loss** — final quality is judged on real hardware (user requirement, replacing pure L∞/rel metrics).
 
+
+**⚠️ v1.0 quality judgement was insufficient** (user feedback 2026-08-21): lossless on static/medium scenes, but **high-motion / fast cuts / dense text / complex actions** showed deformed hands, melted edges, abnormal limb extensions. Root cause = threshold routing's mean-alignment detector prunes low-alignment new-content blocks (see §3.7). Fix = top-K guarantee (v1.1.1).
+
+### 4.6 v1.1.1 validation (routing perf + top-K quality)
+
+**Routing perf** (V100, non-contiguous input, same path as the node):
+
+| S | v1.0 route | v1.1 route | peak mem (v1.1) |
+|---|---|---|---|
+| 29650 | 107ms | **6.2ms** | 1.04GB |
+| 98512 | 182ms | **35.6ms** | 5.01GB |
+| 174112 | est. 450ms+ (OOM risk) | **110.7ms** | 11.94GB |
+
+**Top-K quality** (real-activation snapshot S=6154, rel vs dense):
+
+| config | rel | density | note |
+|---|---|---|---|
+| tau=1.0 topk=0 (v1.0) | 0.1157 | 25.9% | baseline |
+| tau=1.0 topk=32 | 0.0640 (-45%) | 36.3% | guarantee only |
+| **tau=0.75 topk=32 (recommended)** | **0.0619 (-47%)** | 38.6% | quality/speed balance |
+| tau=0.75 topk=64 | 0.0237 (-80%) | 66.6% | max quality, slower |
+
+Top-K covers ~10 extra threshold-missed blocks per row (exactly the dynamic/new-content blocks).
+
+**End-to-end (user real machine, 960×544/5s, S=20822, FLOW_AV, LOW_VRAM)**:
+
+| setup | s/step | vs dense |
+|---|---|---|
+| Pure FP16Safe (dense) | 33 | 1× |
+| **Sol-Attn v1.1.1 (tau=0.75 + topk=32)** | **24** | **+27% faster, quality visually ≈ dense** |
+
+Note: 480p/10s (S≈98512) measured 42 s/step (v1.1 route + tau=0.75) — not comparable to the S=20822 workflow (different seq).
+
+**GPU temperature insight**: sparse kernel at util 99% runs 51-59°C (dense full-load 70°C) = "high-occupancy low-power" (TC not saturated). **Temperature ≠ idle**; don't judge headroom by temperature.
 ## 5. Pitfalls
 
 1. **diff newline pollution**: CRLF/LF mixing makes diff flag every line → use `diff --strip-trailing-cr`.
@@ -102,8 +139,8 @@ Per-head keep-or-drop at τ=1.0: density 26.4% (S=6154 real activations), rel-L2
 
 ## 6. Known limits & next steps
 
-- **Routing overhead**: Python layer ~10ms @ S=29650, theoretically ~1ms at GEMM level. Ideas: torch.compile / in-kernel routing (kijai fused two-level).
-- **Sparse quality ceiling**: H3 attention is diffuse (top-16/97 blocks cover only 66% mass); 95% mass needs ~48% density. Current 26% density is visually lossless in turbo scenarios; sensitive scenes need tuning (tau/end_percent/dense_blocks) or a zeroth-order correction term.
+- **Routing overhead**: Python layer ~35.6ms @ S=98512 (v1.1), theoretically ~1-2ms at GEMM level. Ideas: fused routing CUDA kernel (recompile pyd, remove the scores intermediate); intra-step inter-layer route reuse (P1, needs PSNR verification). Ideas: torch.compile / in-kernel routing (kijai fused two-level).
+- **Sparse quality ceiling**: top-K guarantee (v1.1.1) fixed high-motion/new-content pruning, but density/quality balance still relies on tau/topk tuning. Very sensitive scenes (fine text / complex limbs): try topk=64 or expand dense_blocks/end_percent.
 - **tau_profile (per-block tau)**: kijai supports per-layer tau (low τ for sensitive layers, high τ for insensitive); currently a global tau — can be added later.
 - **Platform**: verified only V100/sm_70 + Windows + cp312; rebuild pyd for other targets.
 - **Candidate routes**: ① own keep-or-drop CUTLASS kernel; ② study NVlabs/Sana sol-engine `models/minimax_h3/A100/adapter.py` (official H3 adaptation, 3.95×-4.52×); ③ wait for official reference implementations.

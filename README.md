@@ -1,6 +1,6 @@
 # ComfyUI-MiniMaxH3-SolAttn-V100
 
-**Sol-Attn（arXiv 2607.24027）稀疏加速 · MiniMax H3 在 V100 上的单节点注意力加速插件（ComfyUI 自定义节点）· v1.0.0**
+**Sol-Attn（arXiv 2607.24027）稀疏加速 · MiniMax H3 在 V100 上的单节点注意力加速插件（ComfyUI 自定义节点）· v1.1.1**
 
 > English version: [README_EN.md](README_EN.md) · 开发/设计文档: [DEVELOPMENT.md](DEVELOPMENT.md) / [DEVELOPMENT_EN.md](DEVELOPMENT_EN.md)
 >
@@ -34,17 +34,16 @@ Sol-Attn 稀疏的核心思路：attention 大多数 score 是噪声，**只对�
 
 ---
 
-## 实测性能（用户真实 ComfyUI，480p/10s）
+## 实测性能（用户真实 ComfyUI）
 
 | 方案 | 每步耗时 | 画质 |
 |---|---|---|
-| 纯 FP16Safe（基线） | 71-74s | 正常 |
-| 纯 SDPA + FP16Safe（dense 兜底） | ~70s | 正常 |
-| **Sol-Attn（推荐，`tau=1.0`）** | **43s** | **肉眼无损** |
+| 纯 FP16Safe（基线） | 71-74s（480p/10s）；33s（960×544/5s） | 正常 |
+| **Sol-Attn v1.1.1（推荐 `tau=0.75, topk=32`）** | **43s（480p/10s）；24s（960×544/5s）** | **肉眼≈dense** |
 
-- vs 纯 FP16Safe：**~1.7×**
+- vs 纯 FP16Safe：480p/10s **~1.7×**；960×544/5s **+27% 加速**，质量与 dense 肉眼接近（top-k 保底修复了 v1.0 在高动态/文字/复杂动作下的手指/边缘问题）
 - 单次 attention（S=29650）：sparse kernel 比 SDPA 快 **4.55×**（路由+kernel 合计 2.77×）
-- 路由已向量化：**10ms @ S=29650**；kernel 直接吃非连续输入省 3 次拷贝
+- 路由 v1.1 已优化：**6.2ms @ S=29650 / 35.6ms @ S=98512**（视图化块统计，零 pad 拷贝）；kernel 直接吃非连续输入省 3 次拷贝
 
 ---
 
@@ -93,21 +92,23 @@ H3 模型 ──> Sol-Attn (V100) ──> 采样器（KSampler 等）
 | `end_percent` | 1.0 | 采样进度高于此比例走 dense（1.0=不启用尾部 dense，与 43s/步 实测一致；调 0.9 保尾部质量） |
 | `min_tokens` | 1024 | 序列短于此 token 数不走稀疏（直接 SDPA） |
 | `dense_blocks` | "0-1" | 保留 dense 的 transformer 块，如 `"0-1"`=前两层，`"0-2,-1"`=前三层+最后一层（-1 从末尾数）；空=全部稀疏 |
-| `h3_prefix_tokens` | 0 | H3 序列 text/cond/ref/audio 前缀 token 数（KV sink 保底，建议填 634+cond+ref+audio 实际值；turbo 场景可留 0） |
+| `h3_prefix_tokens` | 0 | H3 序列 text/cond/ref/audio 前缀 token 数（KV sink 保底；首次运行看控制台 `[SolAttn][v1.1.1] S=...` 输出的 S 估算，建议 ≥ 实际前缀） |
+| `topk_blocks` | 32 | **每行保底块数（质量修复）**：阈值路由是"均值对齐检测"，高动态/新内容块对齐度低会被过滤（手/边缘/肢体在动态帧丢失）。topk 强制每行保留分数最高 K 块。0=关闭（v1.0 行为）。32 对 1540 块 ≈ 2% 密度开销 |
 | `debug_nan` / `profile` | false | 透传 FP16Safe 的 NaN 检测 / 耗时统计 |
 
 ### 推荐配置
 
-- **推荐（480p 最快）**：`tau=1.0, start_percent=0.2, end_percent=1.0, dense_blocks="0-1"` → 43s/步（画质肉眼无损）
-- **更激进**：`tau=1.2~1.5`（密度更低更快，画质需自行确认）
-- **保守**：`dense_blocks="0-2,-1"` 或 `end_percent=0.9`（更多层/尾部走 dense，质量更稳，稍慢）
+- **推荐（质量/速度平衡，v1.1.1）**：`tau=0.75, start_percent=0.2, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32, h3_prefix_tokens=<实际前缀>` → 480p/10s 43s/步；960×544/5s 24s/步（质量≈dense）
+- **速度优先**：`tau=1.0, topk_blocks=16`（密度更低更快，画质需自行确认）
+- **极致质量**：`topk_blocks=64`（每行保底更多，动态/文字细节最稳，速度损失明显）
+- **保守**：`dense_blocks="0-2,-1"` 或 `end_percent=0.8`（更多层/尾部走 dense，质量更稳，稍慢）
 - **小分辨率**（608 及以下）：attention 占比低，稀疏收益小，建议 `end_percent=0` 全 dense 或不用本插件
 
 ---
 
 ## 原理（摘要）
 
-1. **路由（routing.py，官方 Sol-Attn 算法）**：kc 块均值/vc 块和 → diag 阈值（key 空间解析投影）→ 列均值路由（| 邻域 ±1）→ CSR 掩码。per-head 独立，26% 密度下 rel-L2 0.22，但**真实视频肉眼无损**。
+1. **路由（routing.py，官方 Sol-Attn 算法 + v1.1 优化）**：kc 块均值/vc 块和 → diag 阈值（key 空间解析投影）→ 列均值路由（| 邻域 ±1）→ **top-K 保底**（每行保留分数最高 K 块，动态内容兜底）→ CSR 掩码。per-head 独立。
 2. **kernel**：keep-or-drop sparse kernel（选中块精确计算，未选中块跳过），fp16 + head_dim 128，sm70 CUTLASS。
 3. **FP16Safe**：x/16 prescale → qkv → attention → out_proj 后 /16 还原（fp32），deferred isfinite 熔断，触发则整 forward fp32 重跑。
 
@@ -116,14 +117,15 @@ H3 模型 ──> Sol-Attn (V100) ──> 采样器（KSampler 等）
 ## 已知限制
 
 - 仅验证 **V100（sm_70）** + Windows + Python 3.12（cp312 pyd）；其他平台需自行编译 native。
-- 稀疏路由在 Python 层（~10ms @ S=29650），仍有优化空间；kernel 本身很快（4.55×）。
-- 稀疏质量以真机肉眼/PSNR 为准；极敏感场景（如精细文字）建议调高 `dense_blocks` / `end_percent` 或 `tau` 调低。
+- sparse kernel 仅支持**全序列单次调用**（qlen==klen）；若 ComfyUI 路径将 attention 分块调用会输出错误（当前依赖全序列路径，改动上游需重测）。
+- 稀疏质量以真机肉眼/PSNR 为准；极敏感场景（精细文字/复杂肢体）建议 `topk_blocks=64` 或调高 `dense_blocks` / `end_percent`。
 - dense 兜底 = 原版 SDPA。
 
 ---
 
 ## 版本历史
 
+- **v1.1.1（2026-08-22，开发中）**：①路由性能——去每层 GPU→CPU 同步、rank int32、off 显存减半、块统计视图化（S=98512 路由 182→35.6ms，S=174112 不再 OOM）；②**质量修复 top-K 保底**（`topk_blocks`，default 32）：`combined = min(threshold, kthvalue(第K大))` 每行保底 K 块，真实激活 rel 0.1157→0.0619（-47%），解决高动态/切镜/文字/复杂动作下手部与边缘丢失；③prefix debug：控制台打印 `[SolAttn][v1.1.1] S=... 密度=... prefix_tokens=...`；④真机 960×544/5s（S=20822）：**24s/步 vs dense 33s/步（+27%），质量肉眼≈dense**；480p/10s（S≈98512）42s/步（tau=0.75）。推荐配置 `tau=0.75, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32`。
 - **v1.0.0（2026-08-20）正式版**：单节点 = 内嵌 FP16Safe（`fp16safe.py`，v6.8.0 逻辑，自包含）+ Sol-Attn 稀疏（keep-or-drop，sparse-only kernel）。480p/10s 实测 **43s/步，画质肉眼无损**（~1.7× vs 纯 FP16Safe 71-74s）。参数对齐 kijai 风格（tau / start_percent / end_percent / min_tokens / dense_blocks / h3_prefix_tokens）；dense 兜底 = 原版 SDPA；kernel 源码在 `native/` 可自行编译，Release 提供预编译 pyd。版本串 `[SolAttn-V100][V1.0]`。
 
 ---

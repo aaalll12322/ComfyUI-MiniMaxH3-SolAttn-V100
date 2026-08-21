@@ -30,8 +30,10 @@ END_PERCENT_KEY = "solattn_end_percent"
 MIN_TOKENS_KEY = "solattn_min_tokens"
 DENSE_BLOCKS_KEY = "solattn_dense_blocks"
 PREFIX_TOKENS_KEY = "solattn_prefix_tokens"
+TOPK_KEY = "solattn_topk"
 _BLOCK_INDEX_HOOKED = set()
 _EXTENSION_LOADED = False
+_REPORTED_STATS = set()
 
 _PYD_NAME = "comfy_v100_solattn_cuda.cp312-win_amd64.pyd"
 
@@ -131,9 +133,20 @@ def _sparse_attn(q, k, v, heads, scale, opts):
         return None                                       # pyd 未含 sparse op（异常分发）
     tau = float(opts.get(TAU_KEY, 1.0))
     prefix_tokens = int(opts.get(PREFIX_TOKENS_KEY, 0))
+    topk_k = int(opts.get(TOPK_KEY, 0))
+    # v1.1: routing 直接吃非连续 q3/k3（内部视图化块统计，零 pad 拷贝）；
+    # nnz_s 缩小 off 到 NB/2 槽（kernel 运行时读 num_blks，多余槽位不读，省 ~50% 路由显存）。
+    nnz_s = max(256, (S + 63) // 64 // 2)
     cnt, off, ccnt, cidx = routing.build_sparse_csr(
-        q3.contiguous(), k3.contiguous(),
-        tau=tau, scale=scale, sink_tokens=prefix_tokens)
+        q3, k3,
+        tau=tau, scale=scale, sink_tokens=prefix_tokens, nnz_s=nnz_s, topk_k=topk_k)
+    # 首次调用打印序列统计（prefix debug：确认 sink_tokens 是否覆盖 text+cond+ref+audio）
+    if S not in _REPORTED_STATS:
+        _REPORTED_STATS.add(S)
+        dens = float(cnt.float().mean().item()) / max((S + 63) // 64, 1)
+        print(f"[SolAttn][v1.1.1] S={S} blocks={math.ceil(S / 64)} 密度≈{dens * 100:.1f}% "
+              f"| prefix_tokens={prefix_tokens}（建议 = text+cond+ref+audio 实际 token 数，"
+              f"用于 sink 保底）| topk_blocks={topk_k}", flush=True)
     softmax_scale = float(scale if scale is not None else 1.0 / math.sqrt(D))
     cu = torch.tensor([0, S], dtype=torch.int32, device=q.device)
     out, _lse = torch.ops.comfy_v100_solattn_cuda.varlen_fwd_sparse(
@@ -234,6 +247,8 @@ class SolAttnV100:
                                             "tooltip": "保留 dense 的 transformer 块，如 '0-1'=前两层，'0-2,-1'=前三层+最后一层（-1 从末尾数）；空=全部稀疏"}),
                 "h3_prefix_tokens": ("INT", {"default": 0, "min": 0, "max": 65536, "step": 64,
                                              "tooltip": "H3 序列 text/cond/ref/audio 前缀 token 数（KV sink 保底，建议填 634+cond+ref+audio 实际值；turbo 场景可留 0）"}),
+                "topk_blocks": ("INT", {"default": 32, "min": 0, "max": 512, "step": 4,
+                                        "tooltip": "每行保底块数（质量修复）：阈值路由是'均值对齐检测'，高动态/新内容块对齐度低会被过滤（手/边缘/肢体动态帧丢失）。topk 强制每行保留分数最高 K 块，动态内容保底。0=关闭。32 对 1540 块 ≈ 2% 密度开销"}),
             },
             "optional": {
                 "debug_nan": ("BOOLEAN", {"default": False}),
@@ -254,7 +269,7 @@ class SolAttnV100:
     )
 
     def patch(self, model, fp16_safe=True, tau=1.0, start_percent=0.2, end_percent=1.0,
-              min_tokens=1024, dense_blocks="0-1", h3_prefix_tokens=0,
+              min_tokens=1024, dense_blocks="0-1", h3_prefix_tokens=0, topk_blocks=32,
               debug_nan=False, profile=False):
         if not torch.cuda.is_available() or not any(
             torch.cuda.get_device_capability(index) == (7, 0)
@@ -286,11 +301,13 @@ class SolAttnV100:
         n_blocks = len(getattr(diffusion, "blocks", None) or ())
         transformer_options[DENSE_BLOCKS_KEY] = parse_blocks(dense_blocks, n_blocks)
         transformer_options[PREFIX_TOKENS_KEY] = int(h3_prefix_tokens)
+        transformer_options[TOPK_KEY] = int(topk_blocks)
         _install_block_index(diffusion)
-        LOGGER.info("[SolAttn][V1.0] active: fp16_safe=%s tau=%.2f window=[%.2f,%.2f] "
-                    "min_tokens=%d dense_blocks=%s prefix=%d",
+        LOGGER.info("[SolAttn][V1.1.1] active: fp16_safe=%s tau=%.2f window=[%.2f,%.2f] "
+                    "min_tokens=%d dense_blocks=%s prefix=%d topk=%d",
                     bool(fp16_safe), float(tau), float(start_percent), float(end_percent),
-                    int(min_tokens), dense_blocks or "(none)", int(h3_prefix_tokens))
+                    int(min_tokens), dense_blocks or "(none)", int(h3_prefix_tokens),
+                    int(topk_blocks))
         return (patched,)
 
 
