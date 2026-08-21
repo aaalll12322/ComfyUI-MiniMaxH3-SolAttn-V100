@@ -150,5 +150,5 @@ top-k 每行额外覆盖 ~10 个阈值漏掉的块（正是动态/新内容块�
 
 ## 7. 版本历史
 
-- **v1.1.1（开发中，2026-08-22）**：①路由性能——去每层 GPU→CPU 同步、rank int32、off 缩 NB/2、块统计视图化（S=98512 182→35.6ms，S=174112 不 OOM）；②**质量修复 top-K 保底**（`topk_blocks` 参数，default 32）：`combined = min(threshold, kthvalue(第K大))` 每行保底 K 块，真实激活 rel 0.1157→0.0619（-47%），解决高动态/新内容块误剪；③prefix debug：首次调用打印 S/密度/prefix/topk；④真机 960×544/5s（S=20822）：24s/步 vs dense 33s/步（+27%），质量肉眼≈dense；480p/10s（S≈98512）42s/步（tau=0.75）。推荐配置：`tau=0.75, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32`。
+- **v1.1.1（2026-08-22）**：节点默认配置改为推荐值 `tau=0.75, end_percent=0.9, dense_blocks="0-1,-1", h3_prefix_tokens=1024, topk_blocks=32`（开箱即用）：①路由性能——去每层 GPU→CPU 同步、rank int32、off 缩 NB/2、块统计视图化（S=98512 182→35.6ms，S=174112 不 OOM）；②**质量修复 top-K 保底**（`topk_blocks` 参数，default 32）：`combined = min(threshold, kthvalue(第K大))` 每行保底 K 块，真实激活 rel 0.1157→0.0619（-47%），解决高动态/新内容块误剪；③prefix debug：首次调用打印 S/密度/prefix/topk；④真机 960×544/5s（S=20822）：24s/步 vs dense 33s/步（+27%），质量肉眼≈dense；480p/10s（S≈98512）42s/步（tau=0.75）。推荐配置：`tau=0.75, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32`。
 - **v1.0.0（2026-08-20 正式版）**：单节点 = 内嵌 FP16Safe（`fp16safe.py`，v6.8.0 逻辑，自包含）+ Sol-Attn 稀疏（keep-or-drop，sparse-only kernel）。480p/10s 实测 **43s/步，画质肉眼无损**（~1.7× vs 纯 FP16Safe 71-74s）。参数对齐 kijai 风格；dense 兜底 = 原版 SDPA；Release 提供预编译 pyd。

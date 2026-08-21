@@ -45,6 +45,17 @@ Sol-Attn 稀疏的核心思路：attention 大多数 score 是噪声，**只对�
 - 单次 attention（S=29650）：sparse kernel 比 SDPA 快 **4.55×**（路由+kernel 合计 2.77×）
 - 路由 v1.1 已优化：**6.2ms @ S=29650 / 35.6ms @ S=98512**（视图化块统计，零 pad 拷贝）；kernel 直接吃非连续输入省 3 次拷贝
 
+## 质量对比（v1.1.1，960×544/5s，同提示词同种子）
+
+<p align="center">
+  <video src="videos/sparse_solattn.mp4" width="48%"></video>
+  <video src="videos/dense_fp16safe_only.mp4" width="48%"></video>
+</p>
+
+**左：Sol-Attn 稀疏**（tau=0.75 + topk_blocks=32，24s/步）｜**右：纯 FP16Safe dense**（33s/步）
+
+top-K 保底（每行保留分数最高 32 块）解决了 v1.0 在高动态/快速切镜/大量文字/复杂动作下的手部与边缘细节丢失；清晰度与 dense 肉眼接近，差异仅为采样风格多样性。
+
 ---
 
 ## 安装
@@ -57,7 +68,7 @@ git clone https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100.git
 ```
 
 **kernel 获取**（`comfy_v100_solattn_cuda*.pyd`，二选一；插件启动时自动匹配 `comfy_v100_solattn_cuda` 前缀的 pyd，**文件名不要求特定 Python 版本后缀**）：
-- **Release 预编译**：从 [GitHub Release](https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100/releases) 下载（Windows + Python 3.12，零编译）
+- **Release 预编译**：从 [GitHub Release](https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100/releases) 下载（Windows + Python 3.12，零编译）。**v1.1.1 为纯 Python 改动，kernel 未重编译（sha256 `1518648115fa4c527a541ba996c59e0c5ff4c33bbca0ece82d4d56ea367c9f87` 与 v1.0.0 相同）——从 v1.0.0 Release 下载同一份 pyd 即可**
 - **源码编译**：仓库自带完整源码（`native/`，含 CUTLASS），一条命令：
   ```bash
   cd native && python setup.py build_ext --inplace
@@ -98,7 +109,7 @@ H3 模型 ──> Sol-Attn (V100) ──> 采样器（KSampler 等）
 
 ### 推荐配置
 
-- **推荐（质量/速度平衡，v1.1.1）**：`tau=0.75, start_percent=0.2, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32, h3_prefix_tokens=<实际前缀>` → 480p/10s 43s/步；960×544/5s 24s/步（质量≈dense）
+- **默认配置 = 推荐配置（v1.1.1，开箱即用）**：`tau=0.75, start_percent=0.2, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32, h3_prefix_tokens=1024` → 480p/10s 43s/步；960×544/5s 24s/步（质量≈dense）。`h3_prefix_tokens` 建议按首次运行控制台 `[SolAttn] S=...` 调整到 ≥ 实际前缀
 - **速度优先**：`tau=1.0, topk_blocks=16`（密度更低更快，画质需自行确认）
 - **极致质量**：`topk_blocks=64`（每行保底更多，动态/文字细节最稳，速度损失明显）
 - **保守**：`dense_blocks="0-2,-1"` 或 `end_percent=0.8`（更多层/尾部走 dense，质量更稳，稍慢）

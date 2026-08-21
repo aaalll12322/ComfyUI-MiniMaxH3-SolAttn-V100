@@ -45,6 +45,17 @@ Sol-Attn sparse idea: most attention scores are noise — **compute only the few
 - Single attention (S=29650): sparse kernel **4.55×** vs SDPA (route+kernel 2.77×)
 - Routing v1.1: **6.2ms @ S=29650 / 35.6ms @ S=98512** (view-based block stats, zero pad copies); kernel consumes non-contiguous inputs (saves 3 copies)
 
+## Quality comparison (v1.1.1, 960×544/5s, same prompt & seed)
+
+<p align="center">
+  <video src="videos/sparse_solattn.mp4" width="48%"></video>
+  <video src="videos/dense_fp16safe_only.mp4" width="48%"></video>
+</p>
+
+**Left: Sol-Attn sparse** (tau=0.75 + topk_blocks=32, 24 s/step) ｜ **Right: pure FP16Safe dense** (33 s/step)
+
+The top-K guarantee (keep the highest-score 32 blocks per row) fixes v1.0's hand/edge detail loss on high-motion / fast-cut / dense-text / complex-action scenes; sharpness is visually ≈ dense, differences are only sampling-style diversity.
+
 ---
 
 ## Install
@@ -57,7 +68,7 @@ git clone https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100.git
 ```
 
 **Getting the kernel** (`comfy_v100_solattn_cuda*.pyd`, pick one; the plugin auto-matches any pyd whose name starts with `comfy_v100_solattn_cuda` — no specific Python-version suffix required):
-- **Release prebuilt**: download from [GitHub Release](https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100/releases) (Windows + Python 3.12, zero compilation)
+- **Release prebuilt**: download from [GitHub Release](https://github.com/aaalll12322/ComfyUI-MiniMaxH3-SolAttn-V100/releases) (Windows + Python 3.12, zero compilation). **v1.1.1 is a pure-Python change — the kernel was NOT recompiled (sha256 `1518648115fa4c527a541ba996c59e0c5ff4c33bbca0ece82d4d56ea367c9f87`, same as v1.0.0) — grab the same pyd from the v1.0.0 Release**
 - **Build from source**: full source ships in `native/` (incl. CUTLASS), one command:
   ```bash
   cd native && python setup.py build_ext --inplace
@@ -98,7 +109,7 @@ The single node performs fp16 safety + sparse. **No separate FP16Safe node neede
 
 ### Recommended configs
 
-- **Recommended (quality/speed balance, v1.1.1)**: `tau=0.75, start_percent=0.2, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32, h3_prefix_tokens=<actual prefix>` → 43 s/step at 480p/10s; 24 s/step at 960×544/5s (quality ≈ dense)
+- **Default config = recommended config (v1.1.1, out-of-the-box)**: `tau=0.75, start_percent=0.2, end_percent=0.9, dense_blocks="0-1,-1", topk_blocks=32, h3_prefix_tokens=1024` → 43 s/step at 480p/10s; 24 s/step at 960×544/5s (quality ≈ dense). Adjust `h3_prefix_tokens` to ≥ actual prefix (see `[SolAttn] S=...` on first run)
 - **Speed-first**: `tau=1.0, topk_blocks=16` (lower density, faster; verify quality yourself)
 - **Max quality**: `topk_blocks=64` (more guaranteed blocks per row; most stable on motion/text; slower)
 - **Conservative**: `dense_blocks="0-2,-1"` or `end_percent=0.8` (more layers / trailing dense, sturdier quality, slightly slower)

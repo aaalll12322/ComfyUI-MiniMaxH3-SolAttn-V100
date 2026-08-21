@@ -144,3 +144,8 @@ Note: 480p/10s (S≈98512) measured 42 s/step (v1.1 route + tau=0.75) — not co
 - **tau_profile (per-block tau)**: kijai supports per-layer tau (low τ for sensitive layers, high τ for insensitive); currently a global tau — can be added later.
 - **Platform**: verified only V100/sm_70 + Windows + cp312; rebuild pyd for other targets.
 - **Candidate routes**: ① own keep-or-drop CUTLASS kernel; ② study NVlabs/Sana sol-engine `models/minimax_h3/A100/adapter.py` (official H3 adaptation, 3.95×-4.52×); ③ wait for official reference implementations.
+
+## 7. Version history
+
+- **v1.1.1 (2026-08-22)**: node defaults set to the recommended values `tau=0.75, end_percent=0.9, dense_blocks="0-1,-1", h3_prefix_tokens=1024, topk_blocks=32` (out-of-the-box).
+- **v1.0.0 (2026-08-20) initial release**: single node = embedded FP16Safe (fp16safe.py, v6.8.0 logic) + Sol-Attn sparse (keep-or-drop, sparse-only kernel). Measured 480p/10s at **43 s/step, no visible loss** (~1.7× vs pure FP16Safe 71-74 s/step). kijai-style parameters; dense fallback = plain SDPA; kernel source in `native/`, prebuilt pyd from Release.
