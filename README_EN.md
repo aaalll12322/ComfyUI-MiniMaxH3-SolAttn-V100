@@ -48,11 +48,11 @@ Sol-Attn sparse idea: most attention scores are noise — **compute only the few
 ## Quality comparison (v1.1.1, 960×544/5s, same prompt & seed)
 
 <p align="center">
-  <video src="videos/sparse_solattn.mp4" width="48%"></video>
-  <video src="videos/dense_fp16safe_only.mp4" width="48%"></video>
+  <a href="videos/sparse_solattn.mp4"><img src="videos/sparse_solattn.gif" width="48%" alt="Sol-Attn sparse (click for full video)"></a>
+  <a href="videos/dense_fp16safe_only.mp4"><img src="videos/dense_fp16safe_only.gif" width="48%" alt="Pure FP16Safe dense (click for full video)"></a>
 </p>
 
-**Left: Sol-Attn sparse** (tau=0.75 + topk_blocks=32, 24 s/step) ｜ **Right: pure FP16Safe dense** (33 s/step)
+**Left: Sol-Attn sparse** (tau=0.75 + topk_blocks=32, 24 s/step) ｜ **Right: pure FP16Safe dense** (33 s/step) ｜ *GIF is a 480-wide preview; click for the 960×544 original*
 
 The top-K guarantee (keep the highest-score 32 blocks per row) fixes v1.0's hand/edge detail loss on high-motion / fast-cut / dense-text / complex-action scenes; sharpness is visually ≈ dense, differences are only sampling-style diversity.
 

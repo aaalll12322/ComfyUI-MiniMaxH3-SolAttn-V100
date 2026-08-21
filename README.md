@@ -48,11 +48,11 @@ Sol-Attn 稀疏的核心思路：attention 大多数 score 是噪声，**只对�
 ## 质量对比（v1.1.1，960×544/5s，同提示词同种子）
 
 <p align="center">
-  <video src="videos/sparse_solattn.mp4" width="48%"></video>
-  <video src="videos/dense_fp16safe_only.mp4" width="48%"></video>
+  <a href="videos/sparse_solattn.mp4"><img src="videos/sparse_solattn.gif" width="48%" alt="Sol-Attn 稀疏（点击查看原视频）"></a>
+  <a href="videos/dense_fp16safe_only.mp4"><img src="videos/dense_fp16safe_only.gif" width="48%" alt="纯 FP16Safe dense（点击查看原视频）"></a>
 </p>
 
-**左：Sol-Attn 稀疏**（tau=0.75 + topk_blocks=32，24s/步）｜**右：纯 FP16Safe dense**（33s/步）
+**左：Sol-Attn 稀疏**（tau=0.75 + topk_blocks=32，24s/步）｜**右：纯 FP16Safe dense**（33s/步）｜*GIF 为 480 宽预览，点击查看 960×544 原视频*
 
 top-K 保底（每行保留分数最高 32 块）解决了 v1.0 在高动态/快速切镜/大量文字/复杂动作下的手部与边缘细节丢失；清晰度与 dense 肉眼接近，差异仅为采样风格多样性。
 
