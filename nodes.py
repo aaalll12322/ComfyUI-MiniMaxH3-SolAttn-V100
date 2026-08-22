@@ -268,8 +268,8 @@ class SolAttnV100:
         "画质肉眼无损。参数对齐 kijai/ComfyUI-SolAttn_triton 风格。"
     )
 
-    def patch(self, model, fp16_safe=True, tau=1.0, start_percent=0.2, end_percent=1.0,
-              min_tokens=1024, dense_blocks="0-1", h3_prefix_tokens=0, topk_blocks=32,
+    def patch(self, model, fp16_safe=True, tau=0.75, start_percent=0.2, end_percent=0.9,
+              min_tokens=1024, dense_blocks="0-1,-1", h3_prefix_tokens=1024, topk_blocks=32,
               debug_nan=False, profile=False):
         if not torch.cuda.is_available() or not any(
             torch.cuda.get_device_capability(index) == (7, 0)

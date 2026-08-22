@@ -98,12 +98,12 @@ The single node performs fp16 safety + sparse. **No separate FP16Safe node neede
 | Param | Default | Description |
 |---|---|---|
 | `fp16_safe` | true | Embed FP16Safe (prescale /16 + deferred fuse + fp32 re-run). Disable only if another node provides fp16 safety |
-| `tau` | 1.0 | Sparse routing threshold β: higher = sparser/faster. 1.0 ≈ 26% density (V100 fp16, user-verified no visible loss); 1.5 lower density/faster |
+| `tau` | 0.75 | Sparse routing threshold β: higher = sparser/faster. 0.75 ≈ 40% density (V100 real-machine, quality ≈ dense, recommended default); 1.0 ≈ 26% density (faster, quality drops on high-motion/text scenes) |
 | `start_percent` | 0.2 | Run dense before this sampling progress (paper uses 0.2; with turbo 4-step the first step is naturally dense) |
-| `end_percent` | 1.0 | Run dense after this sampling progress (1.0 = no trailing dense, matches the measured 43 s/step; 0.9 keeps trailing quality) |
+| `end_percent` | 0.9 | Run dense after this sampling progress (0.9 = trailing 10% of steps stay dense, recommended default; 1.0 = no trailing dense, fastest) |
 | `min_tokens` | 1024 | Sequences shorter than this stay dense (SDPA) |
-| `dense_blocks` | "0-1" | Transformer blocks kept dense, e.g. `"0-1"` = first two, `"0-2,-1"` = first three + last (-1 counts from the end); empty = sparsify all |
-| `h3_prefix_tokens` | 0 | H3 text/cond/ref/audio prefix tokens (KV sink; first run: check `[SolAttn][v1.1.1] S=...` on console, suggest ≥ actual prefix) |
+| `dense_blocks` | "0-1,-1" | Transformer blocks kept dense, e.g. `"0-1"` = first two, `"0-2,-1"` = first three + last (-1 counts from the end); empty = sparsify all |
+| `h3_prefix_tokens` | 1024 | H3 text/cond/ref/audio prefix tokens (KV sink; 1024 as a starting point for reference-image I2V; first run: check `[SolAttn][v1.1.1] S=...` on console, suggest ≥ actual prefix) |
 | `topk_blocks` | 32 | **Per-row guaranteed blocks (quality fix)**: threshold routing is a "mean-alignment detector" that filters out low-alignment high-motion/new-content blocks (lost hands/edges/limbs). Forces top-K highest-score blocks per row. 0 = off (v1.0 behavior). 32 ≈ 2% density cost on 1540 blocks |
 | `debug_nan` / `profile` | false | Pass-through FP16Safe NaN detection / timing stats |
 

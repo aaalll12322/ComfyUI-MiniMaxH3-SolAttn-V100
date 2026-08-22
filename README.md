@@ -98,12 +98,12 @@ H3 模型 ──> Sol-Attn (V100) ──> 采样器（KSampler 等）
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `fp16_safe` | true | 内嵌 FP16Safe（prescale /16 + 熔断 + fp32 重跑兜底）。关闭需工作流中另有 fp16 安全措施 |
-| `tau` | 1.0 | 稀疏路由阈值 β：越大越稀疏越快。1.0 ≈ 26% 密度（V100 fp16 实测画质肉眼无损），1.5 更低密度更快 |
+| `tau` | 0.75 | 稀疏路由阈值 β：越大越稀疏越快。0.75 ≈ 40% 密度（V100 真机质量≈dense，推荐默认）；1.0 ≈ 26% 密度（更快，高动态/文字场景质量下降） |
 | `start_percent` | 0.2 | 采样进度低于此比例走 dense（论文用 0.2；turbo 4-step 下第一步自然 dense） |
-| `end_percent` | 1.0 | 采样进度高于此比例走 dense（1.0=不启用尾部 dense，与 43s/步 实测一致；调 0.9 保尾部质量） |
+| `end_percent` | 0.9 | 采样进度高于此比例走 dense（0.9=尾部 10% 步保真，推荐默认；1.0=不启用尾部 dense，最快） |
 | `min_tokens` | 1024 | 序列短于此 token 数不走稀疏（直接 SDPA） |
-| `dense_blocks` | "0-1" | 保留 dense 的 transformer 块，如 `"0-1"`=前两层，`"0-2,-1"`=前三层+最后一层（-1 从末尾数）；空=全部稀疏 |
-| `h3_prefix_tokens` | 0 | H3 序列 text/cond/ref/audio 前缀 token 数（KV sink 保底；首次运行看控制台 `[SolAttn][v1.1.1] S=...` 输出的 S 估算，建议 ≥ 实际前缀） |
+| `dense_blocks` | "0-1,-1" | 保留 dense 的 transformer 块，如 `"0-1"`=前两层，`"0-2,-1"`=前三层+最后一层（-1 从末尾数）；空=全部稀疏 |
+| `h3_prefix_tokens` | 1024 | H3 序列 text/cond/ref/audio 前缀 token 数（KV sink 保底；图生视频参考图场景 1024 起步；首次运行看控制台 `[SolAttn][v1.1.1] S=...` 建议 ≥ 实际前缀） |
 | `topk_blocks` | 32 | **每行保底块数（质量修复）**：阈值路由是"均值对齐检测"，高动态/新内容块对齐度低会被过滤（手/边缘/肢体在动态帧丢失）。topk 强制每行保留分数最高 K 块。0=关闭（v1.0 行为）。32 对 1540 块 ≈ 2% 密度开销 |
 | `debug_nan` / `profile` | false | 透传 FP16Safe 的 NaN 检测 / 耗时统计 |
 
